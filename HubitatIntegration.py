@@ -1,8 +1,11 @@
+# pylint: disable=broad-exception-caught
 import json
 import socket
+from typing import Any, Callable
 
 from ovos_workshop.decorators import intent_handler
 from ovos_workshop.skills import OVOSSkill
+from ovos_bus_client.message import Message
 from fuzzywuzzy import fuzz
 import requests
 
@@ -14,14 +17,10 @@ class HubitatIntegration(OVOSSkill):
         super().__init__(*args, **kwargs)
         self.configured = False
         self.dev_commands_dict = {}
-        self.address = None
-        self.attr_dict = None
-        self.min_fuzz = None
-        self.access_token = None
-        self.settings_change_callback = None
-        self.name_dict_present = None
+        self.settings_change_callback: Callable = lambda x: None
+        self.name_dict_present: bool = False
         self.dev_id_dict = {}
-        self.maker_api_app_id = None
+        self.attr_dict = {}
 
     def initialize(self):
         # This dict will hold the device name and its hubitat id number
@@ -32,25 +31,48 @@ class HubitatIntegration(OVOSSkill):
         self.settings_change_callback = self.on_settings_changed
         self.on_settings_changed()
 
+    @property
+    def access_token(self) -> dict[str, Any]:
+        return {'access_token': self.settings.get('access_token', '')}
+
+    @property
+    def address(self) -> str:
+        address = self.settings.get('local_address', 'hubitat.local')
+        # If the device name is local assume it is fairly slow and change it to a dotted quad
+        try:
+            address = socket.gethostbyname(address)
+            socket.inet_aton(address)
+            return address
+        except socket.error:
+            self.log.info(f'Invalid Hostname or IP Address: addr={address}')
+            return 'hubitat.local'
+
+    @property
+    def min_fuzz(self) -> int:
+        try:
+            return int(self.settings.get('minimum_fuzzy_score', '80'))  # TODO: Validate default
+        except ValueError:
+            self.log.error("Invalid minimum fuzzy score, must an integer, setting default to 80")
+            return 80
+
+    @property
+    def maker_api_app_id(self) -> str:
+        return self.settings.get('hubitat_maker_api_app_id', '')
+
     def on_settings_changed(self):
-        # Fetch the settings from the user account on mycroft.ai
-        self.access_token = {'access_token': self.settings.get('access_token')}
-        self.address = self.settings.get('local_address')
-        self.min_fuzz = self.settings.get('minimum_fuzzy_score')
-        self.maker_api_app_id = str(self.settings.get('hubitat_maker_api_app_id'))
         # The attributes are a special case.  I want to end up with a dict indexed by attribute
         # name with the contents being the default device.  But I did not want the user to have
         # to specify this in Python syntax.  So I just have the user give CSVs, possibly in quotes,
         # and the convert them to lists and then to a dict.
-        attr_name = self.settings.get('attr_name')
-        dev_name = self.settings.get('dev_name')
+        attr_name = self.settings.get('attr_name', '')
+        dev_name = self.settings.get('dev_name', '')
         self.log.debug(f"Address={self.address},token={self.access_token},app id={self.maker_api_app_id}")
 
-        if None not in [self.access_token, self.address, self.min_fuzz, self.maker_api_app_id, attr_name, dev_name]:
+        if all([self.access_token, self.address, self.min_fuzz, self.maker_api_app_id, attr_name, dev_name]):
             # Remove quotes
-            attr_name = attr_name.replace('"', '').replace("'", "")
-            dev_name = dev_name.replace('"', '').replace("'", "")
-            self.log.debug("Settings are " + attr_name + " and " + dev_name)
+            attr_name: str = attr_name.replace('"', '').replace("'", "")
+            dev_name: str = dev_name.replace('"', '').replace("'", "")
+            self.log.debug(f'Settings are {attr_name} and {dev_name}')
 
             # Turn them into lists
             attrs = attr_name.rsplit(",")
@@ -62,14 +84,6 @@ class HubitatIntegration(OVOSSkill):
             self.attr_dict["testattr"] = "testAttrDev"
             self.log.debug(self.attr_dict)
 
-            # If the device name is local assume it is fairly slow and change it to a dotted quad
-            try:
-                self.address = socket.gethostbyname(self.address)
-                socket.inet_aton(self.address)
-            except socket.error:
-                self.log.info("Invalid Hostname or IP Address: addr={}".format(self.address))
-                return
-
             self.log.debug(
                 f"Updated settings: access token={self.access_token}, fuzzy={self.min_fuzz}, addr={self.address}, "
                 f"makerApiId={self.maker_api_app_id}, attr dictionary={self.attr_dict}")
@@ -77,12 +91,14 @@ class HubitatIntegration(OVOSSkill):
 
     def not_configured(self):
         self.log.debug("Cannot Run Intent - Settings not Configured")
+
+
     #
     # Intent handlers
     #
 
     @intent_handler('turn.on.intent')
-    def handle_on_intent(self, message):
+    def handle_on_intent(self, message: Message):
         # This is for utterances like "turn on the xxx"
         if self.configured:
             self.handle_on_or_off_intent(message, 'on')
@@ -90,7 +106,7 @@ class HubitatIntegration(OVOSSkill):
             self.not_configured()
 
     @intent_handler('turn.off.intent')
-    def handle_off_intent(self, message):
+    def handle_off_intent(self, message: Message):
         # For utterances like "turn off the xxx".  A
         if self.configured:
             self.handle_on_or_off_intent(message, 'off')
@@ -98,13 +114,15 @@ class HubitatIntegration(OVOSSkill):
             self.not_configured()
 
     @intent_handler('level.intent')
-    def handle_level_intent(self, message):
+    def handle_level_intent(self, message: Message):
         if self.configured:
             # For utterances like "set the xxx to yyy%"
+            device = ''
             try:
                 device = self.get_hub_device_name(message)
-            except:
+            except Exception as err:
                 # g_h_d_n speaks a dialog before throwing an error
+                self.log.error(err)
                 return
 
             level = message.data.get('level')
@@ -112,6 +130,9 @@ class HubitatIntegration(OVOSSkill):
             self.log.debug("Set Level Supported Modes: " + str(supported_modes))
             self.log.debug("Level is: " + str(level))
 
+            if not device:
+                self.log.error('No Device passed in utterance!')
+                return
             if level in supported_modes:
                 if self.is_command_available(command='setThermostatMode', device=device):
                     self.hub_command_devices(self.hub_get_device_id(device), "setThermostatMode", level)
@@ -124,20 +145,22 @@ class HubitatIntegration(OVOSSkill):
             self.not_configured()
 
     @intent_handler('attr.intent')
-    def handle_attr_intent(self, message):
+    def handle_attr_intent(self, message: Message):
         if self.configured:
             # This one is for getting device attributes like level or temperature
             try:
-                attr = self.hub_get_attr_name(message.data.get('attr'))
-            except:
+                attr: str = self.hub_get_attr_name(message.data.get('attr', ''))
+            except Exception as err:
                 # Get_attr_name also speaks before throwing an error
+                self.log.error(err)
                 return
             try:
                 device = self.get_hub_device_name(message)
-            except:
+            except Exception as err:
+                self.log.warning(f"Error getting device name: {err}, trying to get device from attribute name")
                 device = self.get_hub_device_name_from_text(self.attr_dict[attr])
 
-            self.log.debug("Found attribute={},device={}".format(attr, device))
+            self.log.debug(f"Found attribute={attr},device={device}")
             val = self.hub_get_attribute(self.hub_get_device_id(device), attr)
             if val is None:
                 self.speak_dialog('attr.not.supported', data={'device': device, 'attr': attr})
@@ -161,27 +184,26 @@ class HubitatIntegration(OVOSSkill):
             if not self.name_dict_present:
                 self.update_devices()
             number = 0
-            for hubDev in self.dev_id_dict:
-                ident = self.dev_id_dict[hubDev]
-
+            for hub_dev, ident in self.dev_id_dict.items():
                 # Speak the real devices, but not the test devices
                 if ident[0:6] != '**test':
                     number = number + 1
-                    self.speak_dialog('list.devices', data={'number': str(number), 'name': hubDev, 'id': ident})
+                    self.speak_dialog('list.devices', data={'number': str(number), 'name': hub_dev, 'id': ident})
         else:
             self.not_configured()
 
     #
     # Routines used by intent handlers
     #
-    def handle_on_or_off_intent(self, message, cmd):
+    def handle_on_or_off_intent(self, message: Message, cmd):
         # Used for both on and off
         try:
             self.log.debug("In on/off intent with command " + cmd)
             device = self.get_hub_device_name(message)
             silence = message.data.get('how')
-        except:
+        except Exception as err:
             # get_hub_device_name speaks the error dialog
+            self.log.error(err)
             return
 
         if self.is_command_available(command=cmd, device=device):
@@ -189,7 +211,8 @@ class HubitatIntegration(OVOSSkill):
                 self.hub_command_devices(self.hub_get_device_id(device), cmd)
                 if silence is None:
                     self.speak_dialog('ok', data={'device': device})
-            except:
+            except Exception as error:
+                self.log.error(f'Error on command, probably a bad URL: {error}')
                 # If command devices throws an error, probably a bad URL
                 self.speak_dialog('url.error')
 
@@ -203,7 +226,7 @@ class HubitatIntegration(OVOSSkill):
         self.speak_dialog('command.not.supported', data={'device': device, 'command': command})
         return False
 
-    def get_hub_device_name(self, message):
+    def get_hub_device_name(self, message: Message):
         # This one looks in an utterance message for 'device' and then passes the text to
         # get_hub_device_name_from_text to see if it is in Hubitat
         self.log.debug("In get_h_d_n with device=")
@@ -252,21 +275,22 @@ class HubitatIntegration(OVOSSkill):
             if device.find(hub_dev) >= 0:
                 self.log.debug("Found device I said: " + hub_dev + " ID=" + hub_id)
                 return hub_id
+        return ''
 
-    def hub_get_attr_name(self, name):
+    def hub_get_attr_name(self, name) -> str:
         # This is why we need a list of possible attributes.  Otherwise we could not do a fuzzy search.
-        best_name = None
+        best_name = ''
         best_score = self.min_fuzz
         self.log.debug(self.attr_dict)
-        attr = None
+        attr = ''
 
-        for attr in self.attr_dict:
-            self.log.debug("attr is {}".format(attr))
+        for attribute, _ in self.attr_dict.items():
+            self.log.debug(f"attr is {attribute}")
             score = fuzz.token_sort_ratio(attr, name)
             # self.log.info("Hubitat="+hubDev+", utterance="+text+" score="+str(score))
             if score > best_score:
                 best_score = score
-                best_name = attr
+                best_name = attribute
 
         self.log.debug("Best score is " + str(best_score))
         if best_score > self.min_fuzz:
@@ -276,6 +300,7 @@ class HubitatIntegration(OVOSSkill):
             self.log.debug("No device found for " + name)
             self.speak_dialog('attr.not.supported', data={'device': 'any device in settings', 'attr': name})
             self.log.error(f"Unsupported Attribute for {name}")
+        return ''
 
     def hub_command_devices(self, dev_id, state, value=None):
         # Build a URL to send the requested command to the Hubitat and
@@ -290,20 +315,20 @@ class HubitatIntegration(OVOSSkill):
         self.access_hubitat(url)
 
     def hub_get_attribute(self, dev_id, attr):
-        self.log.debug("Looking for attr {}".format(attr))
+        self.log.debug(f"Looking for attr {attr}")
         # The json string from Hubitat turns into a dict.  The key attributes
         # has a value of a list.  The list is a list of dicts with the attribute
         # name, value, and other things that we don't care about.  So here when
         # the device was a test device, we fake out the attributes for testing
         if dev_id == "**testAttr":
-            tempList = [{'name': "testattr", "currentValue": 99}]
-            jsn = {"attributes": tempList}
+            temp_list = [{'name': "testattr", "currentValue": 99}]
+            jsn = {"attributes": temp_list}
             x = jsn["attributes"]
         else:
             # Here we get the real json string from hubitat
             url = "/apps/api/" + self.maker_api_app_id + "/devices/" + dev_id
-            retVal = self.access_hubitat(url)
-            jsn = json.loads(retVal)
+            ret_val = self.access_hubitat(url)
+            jsn = json.loads(ret_val)
             self.log.debug(jsn)
         # Now we have a nested set of dicts and lists as described above, either a simple
         # one for test or the real (and more complex) one for a real Hubitat
@@ -315,11 +340,11 @@ class HubitatIntegration(OVOSSkill):
                         self.log.debug("Found Attribute Match: " + str(ret_attr.get('currentValue')))
                         return ret_attr.get('currentValue')
         return ""
-    
+
     def update_devices(self):
-        json_data = None
-        this_label = None
-        this_id = None
+        json_data = {}
+        this_label = ''
+        this_id = ''
         # Init the device list and command list with tests
         self.dev_commands_dict = {"testOnDev": ["on"], "testOnOffDev": ["on", "off"],
                                   "testLevelDev": ["on", "off", "setLevel"]}
@@ -337,8 +362,8 @@ class HubitatIntegration(OVOSSkill):
             return 0
         try:
             json_data = json.loads(request)
-        except:
-            self.log.debug("Error on json load")
+        except Exception as err:
+            self.log.debug(f"Error on json load:\n{err}")
         count = 0
         for device in json_data:
             # For every device returned, record as a dict the id to use in a URL and the label to be spoken
@@ -362,24 +387,26 @@ class HubitatIntegration(OVOSSkill):
         self.name_dict_present = True
         return count
 
-    def access_hubitat(self, part_url):
+    def access_hubitat(self, part_url: str):
         # This routine knows how to talk to the hubitat.  It builds the URL from
-        # the know access type (http://) and the domain info or dotted quad in
+        # the known access type (http://) and the domain info or dotted quad in
         # self.address, followed by the command info passed in by the caller.
-        request = None
+        request = requests.Response()
         url = "http://" + self.address + part_url
         try:
             request = requests.get(url, params=self.access_token, timeout=5)
-        except:
+        except Exception as err:
+            self.log.warning(f"Error on request, will try to find new IP:\n{err}")
             # If the request throws an error, the address may have changed.  Try
             # 'hubitat.local' as a backup.
             try:
                 self.speak_dialog('url.backup')
-                self.address = socket.gethostbyname("hubitat.local")
+                self.settings['address'] = socket.gethostbyname("hubitat.local")
                 url = "http://" + self.address + part_url
                 self.log.debug("Fell back to hubitat.local which translated to " + self.address)
                 request = requests.get(url, params=self.access_token, timeout=10)
-            except:
+            except Exception as error:
+                self.log.warning(f"Got an error from requests:\n{error}")
                 self.log.debug("Got an error from requests")
                 self.speak_dialog('url.error')
         return request.text if request else ""
