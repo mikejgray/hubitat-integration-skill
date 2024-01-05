@@ -13,7 +13,10 @@ from ovos_workshop.skills.base import BaseSkill
 
 
 def get_skill_object(
-    skill_entrypoint: str, bus: FakeBus, skill_id: str, config_patch: Optional[dict] = None
+    skill_entrypoint: str,
+    bus: FakeBus,
+    skill_id: str,
+    config_patch: Optional[dict] = None,
 ) -> BaseSkill:
     """
     Get an initialized skill object by entrypoint with the requested skill_id.
@@ -51,7 +54,11 @@ class SkillTestCase(unittest.TestCase):
     environ["XDG_DATA_HOME"] = data_dir
     environ["XDG_CONFIG_HOME"] = conf_dir
     makedirs(join(conf_dir, "mycroft/skills/skill-activu.neongeckocom"), exist_ok=True)
-    with open(join(conf_dir, "mycroft/skills/skill-activu.neongeckocom/settings.json"), "w+", encoding="utf-8") as f:
+    with open(
+        join(conf_dir, "mycroft/skills/skill-activu.neongeckocom/settings.json"),
+        "w+",
+        encoding="utf-8",
+    ) as f:
         test_settings = {
             "__mycroft_skill_firstrun": False,
             "endpoint": getenv("ENDPOINT"),
@@ -79,7 +86,9 @@ class SkillTestCase(unittest.TestCase):
         if not skill_entrypoint:
             raise ValueError("No skill entrypoint found, cannot test")
 
-        cls.skill = get_skill_object(skill_entrypoint=skill_entrypoint, skill_id=cls.test_skill_id, bus=cls.bus)
+        cls.skill = get_skill_object(
+            skill_entrypoint=skill_entrypoint, skill_id=cls.test_skill_id, bus=cls.bus
+        )
         # Override speak and speak_dialog to test passed arguments
         cls.skill.speak = Mock()
         cls.skill.speak_dialog = Mock()

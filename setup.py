@@ -10,7 +10,9 @@ PYPI_NAME = "skill-hubitat-integration"  # pip install PYPI_NAME
 # below derived from github url to ensure standard skill_id
 SKILL_AUTHOR, SKILL_NAME = URL.split(".com/")[-1].split("/")
 SKILL_PKG = SKILL_NAME.lower().replace("-", "_")
-PLUGIN_ENTRY_POINT = f"{SKILL_NAME.lower()}.{SKILL_AUTHOR.lower()}={SKILL_PKG}:{SKILL_CLAZZ}"
+PLUGIN_ENTRY_POINT = (
+    f"{SKILL_NAME.lower()}.{SKILL_AUTHOR.lower()}={SKILL_PKG}:{SKILL_CLAZZ}"
+)
 # skill_id=package_name:SkillClass
 BASE_PATH = BASE_PATH = path.abspath(path.join(path.dirname(__file__), "."))
 
@@ -43,7 +45,9 @@ def get_requirements(requirements_filename: str):
     requirements_file = path.join(path.dirname(__file__), requirements_filename)
     with open(requirements_file, "r", encoding="utf-8") as r:
         requirements = r.readlines()
-    requirements = [r.strip() for r in requirements if r.strip() and not r.strip().startswith("#")]
+    requirements = [
+        r.strip() for r in requirements if r.strip() and not r.strip().startswith("#")
+    ]
     return requirements
 
 
@@ -54,7 +58,9 @@ def find_resource_files():
         if path.isdir(path.join(BASE_PATH, res)):
             for directory, _, files in walk(path.join(BASE_PATH, res)):
                 if files:
-                    package_data.append(path.join(directory.replace(BASE_PATH, "").lstrip("/"), "*"))
+                    package_data.append(
+                        path.join(directory.replace(BASE_PATH, "").lstrip("/"), "*")
+                    )
     return package_data
 
 

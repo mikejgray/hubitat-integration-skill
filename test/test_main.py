@@ -4,6 +4,7 @@ from ovos_workshop.skills import OVOSSkill
 from hubitat_integration_skill import HubitatIntegration
 from . import SkillTestCase
 
+
 class HubitatIntegrationSkillTestCase(SkillTestCase):
     """ActivuSkill unit test class."""
 
