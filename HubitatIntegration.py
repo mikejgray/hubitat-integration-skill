@@ -1,15 +1,17 @@
-from mycroft import MycroftSkill, intent_file_handler
-from fuzzywuzzy import fuzz
-import requests
 import json
 import socket
+
+from ovos_workshop.decorators import intent_handler
+from ovos_workshop.skills import OVOSSkill
+from fuzzywuzzy import fuzz
+import requests
 
 __author__ = "burnsfisher,GonzRon"
 
 
-class HubitatIntegration(MycroftSkill):
-    def __init__(self):
-        super().__init__()
+class HubitatIntegration(OVOSSkill):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.configured = False
         self.dev_commands_dict = {}
         self.address = None
@@ -79,7 +81,7 @@ class HubitatIntegration(MycroftSkill):
     # Intent handlers
     #
 
-    @intent_file_handler('turn.on.intent')
+    @intent_handler('turn.on.intent')
     def handle_on_intent(self, message):
         # This is for utterances like "turn on the xxx"
         if self.configured:
@@ -87,7 +89,7 @@ class HubitatIntegration(MycroftSkill):
         else:
             self.not_configured()
 
-    @intent_file_handler('turn.off.intent')
+    @intent_handler('turn.off.intent')
     def handle_off_intent(self, message):
         # For utterances like "turn off the xxx".  A
         if self.configured:
@@ -95,7 +97,7 @@ class HubitatIntegration(MycroftSkill):
         else:
             self.not_configured()
 
-    @intent_file_handler('level.intent')
+    @intent_handler('level.intent')
     def handle_level_intent(self, message):
         if self.configured:
             # For utterances like "set the xxx to yyy%"
@@ -121,7 +123,7 @@ class HubitatIntegration(MycroftSkill):
         else:
             self.not_configured()
 
-    @intent_file_handler('attr.intent')
+    @intent_handler('attr.intent')
     def handle_attr_intent(self, message):
         if self.configured:
             # This one is for getting device attributes like level or temperature
@@ -144,8 +146,8 @@ class HubitatIntegration(MycroftSkill):
         else:
             self.not_configured()
 
-    @intent_file_handler('rescan.intent')
-    def handle_rescan_intent(self, message):
+    @intent_handler('rescan.intent')
+    def handle_rescan_intent(self, _):
         if self.configured:
             count = self.update_devices()
             self.log.info(str(count))
@@ -153,8 +155,8 @@ class HubitatIntegration(MycroftSkill):
         else:
             self.not_configured()
 
-    @intent_file_handler('list.devices.intent')
-    def handle_list_devices_intent(self, message):
+    @intent_handler('list.devices.intent')
+    def handle_list_devices_intent(self, _):
         if self.configured:
             if not self.name_dict_present:
                 self.update_devices()
@@ -381,4 +383,3 @@ class HubitatIntegration(MycroftSkill):
                 self.log.debug("Got an error from requests")
                 self.speak_dialog('url.error')
         return request.text if request else ""
-
