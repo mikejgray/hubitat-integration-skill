@@ -1,4 +1,5 @@
 # pylint: disable=broad-exception-caught,missing-class-docstring,missing-module-docstring
+# pylint: disable=logging-not-lazy,logging-fstring-interpolation,invalid-name
 import json
 import socket
 from typing import Any, Callable
@@ -9,7 +10,7 @@ from ovos_bus_client.message import Message
 from ovos_utils.parse import fuzzy_match, MatchStrategy
 import requests
 
-__author__ = "burnsfisher,GonzRon"
+__author__ = "burnsfisher,GonzRon,mikejgray"
 
 
 class HubitatIntegration(OVOSSkill):
@@ -27,8 +28,7 @@ class HubitatIntegration(OVOSSkill):
         # This dict will hold the device name and its hubitat id number
         self.dev_id_dict = {}
         self.name_dict_present = False
-        # Get a few settings from the Mycroft web site (they are specific to the user site) and
-        # get the current values
+        # User settings
         self.settings_change_callback = self.on_settings_changed
         self.on_settings_changed()
 
@@ -43,19 +43,21 @@ class HubitatIntegration(OVOSSkill):
 
     @property
     def address(self) -> str:
-        """Retrieves the address property from settings.
+        """Retrieves the address property from settings and tries to make a connection.
+        If it fails to connect, it returns the default of hubitat.local.
 
         Returns:
             str: address
         """
-        address = self.settings.get("local_address", "hubitat.local")
+        address = self.settings.get("local_address", "hubitat")
         # If the device name is local assume it is fairly slow and change it to a dotted quad
         try:
             address = socket.gethostbyname(address)
             socket.inet_aton(address)
             return address
         except socket.error:
-            self.log.info(f"Invalid Hostname or IP Address: addr={address}")
+            self.log.info("Invalid Hostname or IP Address: addr=%s", address)
+            self.log.info("Failed to connect by IP, returning default of hubitat.local")
             return "hubitat.local"
 
     @property
@@ -127,6 +129,7 @@ class HubitatIntegration(OVOSSkill):
 
     def not_configured(self):
         """Speak a dialog and log an error"""
+        self.speak_dialog("not.configured", data={"address": self.address})
         self.log.debug("Cannot Run Intent - Settings not Configured")
 
     #
@@ -398,7 +401,6 @@ class HubitatIntegration(OVOSSkill):
         if dev_id == "**testAttr":
             temp_list = [{"name": "testattr", "currentValue": 99}]
             jsn = {"attributes": temp_list}
-            x = jsn["attributes"]
         else:
             # Here we get the real json string from hubitat
             url = "/apps/api/" + self.maker_api_app_id + "/devices/" + dev_id

@@ -1,0 +1,3 @@
+Hubitat isn't reachable at {{address}}, so I can't do that.
+I tried, but I can't reach Hubitat at {{address}}.
+You may need to configure the Hubitat address first. {{address}} isn't working.
