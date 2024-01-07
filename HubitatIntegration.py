@@ -54,11 +54,13 @@ class HubitatIntegration(OVOSSkill):
         try:
             address = socket.gethostbyname(address)
             socket.inet_aton(address)
+            self.configured = True
             return address
         except socket.error:
             self.log.info("Invalid Hostname or IP Address: addr=%s", address)
             self.log.info("Failed to connect by IP, returning default of hubitat.local")
-            return "hubitat.local"
+            self.configured = False
+            return "hubitat"
 
     @property
     def min_fuzz(self) -> int:
@@ -68,12 +70,12 @@ class HubitatIntegration(OVOSSkill):
             int: minimum_fuzzy_score
         """
         try:
-            return int(self.settings.get("minimum_fuzzy_score", "50"))
+            return int(self.settings.get("minimum_fuzzy_score", "75"))
         except ValueError:
             self.log.error(
-                "Invalid minimum fuzzy score, must an integer, setting default to 50"
+                "Invalid minimum fuzzy score, must an integer, setting default to 75"
             )
-            return 50
+            return 75
 
     @property
     def maker_api_app_id(self) -> str:
@@ -309,7 +311,7 @@ class HubitatIntegration(OVOSSkill):
         """Look for a device name in the list of Hubitat devices.
         The text may have something a bit different than the real name like "the light" or "lights" rather
         than the actual Hubitat name of light.  This finds the actual Hubitat name using fuzzy search and
-        the match score specified as a setting by the user (default of 50)
+        the match score specified as a setting by the user (default of 75)
         """
         if not self.name_dict_present:
             # In case we never got the devices
